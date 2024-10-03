@@ -4,10 +4,14 @@ const morgan = require('morgan');
 const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
+const cors = require('cors'); // Import cors package
 const logger = require('./logger'); // Import the logger
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Enable CORS for all routes
+app.use(cors());
 
 // Middleware to log requests using morgan with Winston stream
 app.use(morgan('combined', { stream: logger.stream }));
