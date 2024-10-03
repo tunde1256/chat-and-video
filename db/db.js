@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 
-const connection = mongoose.connect('mongodb://localhost/myDatabase', {
+const connection = mongoose.connect('mongodb+srv://ogunremitunde12:ogunremitunde12@cluster0.g3bnlww.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
 
     
 })
