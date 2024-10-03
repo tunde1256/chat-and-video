@@ -6,9 +6,11 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors'); // Import cors package
 const logger = require('./logger'); // Import the logger
-
+const  db = require('./db/db')
 const app = express();
 const port = process.env.PORT || 3000;
+const  userRoutes = require('./routes/userRouter')
+const  AdminRoutes = require('./routes/adminRouter')
 
 // Enable CORS for all routes
 app.use(cors());
@@ -21,6 +23,9 @@ app.use(bodyParser.urlencoded({ extended: false }));
 
 // Middleware to parse JSON request bodies
 app.use(express.json());
+
+app.use('/api/users',userRoutes)
+app.use('/api/admin',AdminRoutes)
 
 // Create an HTTP server from the Express app
 const server = http.createServer(app);
