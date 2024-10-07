@@ -6,11 +6,11 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors'); // Import cors package
 const logger = require('./logger'); // Import the logger
-const  db = require('./db/db')
+const db = require('./db/db');
 const app = express();
 const port = process.env.PORT || 3000;
-const  userRoutes = require('./routes/userRouter')
-const  AdminRoutes = require('./routes/adminRouter')
+const userRoutes = require('./routes/userRouter');
+const AdminRoutes = require('./routes/adminRouter');
 
 // Enable CORS for all routes
 app.use(cors());
@@ -24,8 +24,8 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // Middleware to parse JSON request bodies
 app.use(express.json());
 
-app.use('/api/users',userRoutes)
-app.use('/api/admin',AdminRoutes)
+app.use('/api/users', userRoutes);
+app.use('/api/admin', AdminRoutes);
 
 // Create an HTTP server from the Express app
 const server = http.createServer(app);
@@ -35,6 +35,8 @@ const wss = new WebSocket.Server({ server });
 
 // Store clients in a Map to identify them by user ID or a unique identifier
 const clients = new Map();
+// Store meeting participants
+const meetings = new Map();
 
 wss.on('connection', (ws) => {
     logger.info('New client connected via WebSocket');
@@ -53,6 +55,28 @@ wss.on('connection', (ws) => {
             ws.userId = userId; // Store the userId on the WebSocket connection for later use
             logger.info(`User registered: ${userId}`);
             ws.send('You are now registered for direct messaging');
+        } else if (parsedMessage.startsWith('joinMeeting:')) {
+            const [_, userId, meetingId] = parsedMessage.split(':');
+            logger.info(`${userId} is joining meeting: ${meetingId}`);
+
+            // Add user to the meeting
+            if (!meetings.has(meetingId)) {
+                meetings.set(meetingId, new Set());
+            }
+            meetings.get(meetingId).add(userId);
+            ws.send(`Joined meeting: ${meetingId}`);
+        } else if (parsedMessage.startsWith('leaveMeeting:')) {
+            const [_, userId, meetingId] = parsedMessage.split(':');
+            logger.info(`${userId} is leaving meeting: ${meetingId}`);
+
+            // Remove user from the meeting
+            if (meetings.has(meetingId)) {
+                meetings.get(meetingId).delete(userId);
+                if (meetings.get(meetingId).size === 0) {
+                    meetings.delete(meetingId); // Remove meeting if no participants are left
+                }
+            }
+            ws.send(`Left meeting: ${meetingId}`);
         } else if (parsedMessage.startsWith('dm:')) {
             // Handle direct messages
             const [_, senderId, recipientId, text] = parsedMessage.split(':');
@@ -63,10 +87,8 @@ wss.on('connection', (ws) => {
             if (recipientSocket) {
                 // Send the message to the recipient
                 recipientSocket.send(`dm:${senderId}:${text}`);
-                // Optionally send a confirmation back to the sender
                 ws.send('DM sent successfully');
             } else {
-                // Handle the case where the recipient is not connected
                 ws.send('Recipient not connected');
             }
         } else if (parsedMessage.startsWith('forum:')) {
@@ -80,8 +102,23 @@ wss.on('connection', (ws) => {
                     clientSocket.send(`forum:${senderId}:${text}`);
                 }
             });
-            // Also send confirmation to the sender
             ws.send('Forum message sent successfully');
+        } else if (parsedMessage.startsWith('videoCall:')) {
+            // Handle video call signaling
+            const [_, senderId, meetingId, signalData] = parsedMessage.split(':');
+            logger.info(`Video call signal from ${senderId} in meeting ${meetingId}`);
+
+            // Notify all participants in the meeting
+            if (meetings.has(meetingId)) {
+                meetings.get(meetingId).forEach(participantId => {
+                    const participantSocket = clients.get(participantId);
+                    if (participantSocket) {
+                        participantSocket.send(`videoCall:${senderId}:${signalData}`);
+                    }
+                });
+            } else {
+                ws.send('Meeting not found');
+            }
         } else {
             // Handle unknown messages
             ws.send('Unknown message type');
@@ -93,6 +130,13 @@ wss.on('connection', (ws) => {
         logger.info(`WebSocket client disconnected: ${ws.userId}`);
         // Remove the client from the clients map when they disconnect
         clients.delete(ws.userId);
+        
+        // Remove user from all meetings
+        meetings.forEach((participants, meetingId) => {
+            if (participants.delete(ws.userId) && participants.size === 0) {
+                meetings.delete(meetingId); // Remove meeting if no participants are left
+            }
+        });
     });
 });
 
