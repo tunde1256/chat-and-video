@@ -41,102 +41,104 @@ const meetings = new Map();
 wss.on('connection', (ws) => {
     logger.info('New client connected via WebSocket');
 
-    // Handle registration of users
     ws.on('message', (message) => {
-        // Convert message to string format
-        const parsedMessage = message.toString();
+        let parsedMessage;
+        try {
+            parsedMessage = JSON.parse(message);  // Parsing as JSON
+        } catch (err) {
+            ws.send('Invalid message format');
+            return;
+        }
 
-        // Check if the message is a registration message
-        if (parsedMessage.startsWith('register:')) {
-            const userId = parsedMessage.split(':')[1];
+        const { type, userId, recipientId, meetingId, text, signalData } = parsedMessage;
 
-            // Store the socket connection for the user
-            clients.set(userId, ws);
-            ws.userId = userId; // Store the userId on the WebSocket connection for later use
-            logger.info(`User registered: ${userId}`);
-            ws.send('You are now registered for direct messaging');
-        } else if (parsedMessage.startsWith('joinMeeting:')) {
-            const [_, userId, meetingId] = parsedMessage.split(':');
-            logger.info(`${userId} is joining meeting: ${meetingId}`);
+        switch (type) {
+            case 'register':
+                clients.set(userId, ws);
+                ws.userId = userId;
+                logger.info(`User registered: ${userId}`);
+                ws.send('You are now registered for direct messaging');
+                break;
 
-            // Add user to the meeting
-            if (!meetings.has(meetingId)) {
-                meetings.set(meetingId, new Set());
-            }
-            meetings.get(meetingId).add(userId);
-            ws.send(`Joined meeting: ${meetingId}`);
-        } else if (parsedMessage.startsWith('leaveMeeting:')) {
-            const [_, userId, meetingId] = parsedMessage.split(':');
-            logger.info(`${userId} is leaving meeting: ${meetingId}`);
+            case 'createMeeting':
+                const newMeetingId = `meeting-${Date.now()}`;
+                meetings.set(newMeetingId, new Set([userId]));
+                ws.send(`meetingCreated:${newMeetingId}:https://yourfrontend.com/meeting/${newMeetingId}`);
+                break;
 
-            // Remove user from the meeting
-            if (meetings.has(meetingId)) {
-                meetings.get(meetingId).delete(userId);
-                if (meetings.get(meetingId).size === 0) {
-                    meetings.delete(meetingId); // Remove meeting if no participants are left
+            case 'joinMeeting':
+                logger.info(`${userId} is joining meeting: ${meetingId}`);
+                if (!meetings.has(meetingId)) {
+                    meetings.set(meetingId, new Set());
                 }
-            }
-            ws.send(`Left meeting: ${meetingId}`);
-        } else if (parsedMessage.startsWith('dm:')) {
-            // Handle direct messages
-            const [_, senderId, recipientId, text] = parsedMessage.split(':');
-            logger.info(`Received DM from ${senderId} to ${recipientId}: ${text}`);
+                meetings.get(meetingId).add(userId);
+                ws.send(`Joined meeting: ${meetingId}`);
+                break;
 
-            // Check if recipient is connected
-            const recipientSocket = clients.get(recipientId);
-            if (recipientSocket) {
-                // Send the message to the recipient
-                recipientSocket.send(`dm:${senderId}:${text}`);
-                ws.send('DM sent successfully');
-            } else {
-                ws.send('Recipient not connected');
-            }
-        } else if (parsedMessage.startsWith('forum:')) {
-            // Handle forum messages (broadcast to all connected clients)
-            const [_, senderId, text] = parsedMessage.split(':');
-            logger.info(`Received forum message from ${senderId}: ${text}`);
-
-            // Broadcast the message to all connected clients
-            clients.forEach((clientSocket, userId) => {
-                if (clientSocket !== ws) { // Don't send back to the sender
-                    clientSocket.send(`forum:${senderId}:${text}`);
+            case 'leaveMeeting':
+                logger.info(`${userId} is leaving meeting: ${meetingId}`);
+                if (meetings.has(meetingId)) {
+                    meetings.get(meetingId).delete(userId);
+                    if (meetings.get(meetingId).size === 0) {
+                        meetings.delete(meetingId); // Remove meeting if no participants are left
+                    }
                 }
-            });
-            ws.send('Forum message sent successfully');
-        } else if (parsedMessage.startsWith('videoCall:')) {
-            // Handle video call signaling
-            const [_, senderId, meetingId, signalData] = parsedMessage.split(':');
-            logger.info(`Video call signal from ${senderId} in meeting ${meetingId}`);
+                ws.send(`Left meeting: ${meetingId}`);
+                break;
 
-            // Notify all participants in the meeting
-            if (meetings.has(meetingId)) {
-                meetings.get(meetingId).forEach(participantId => {
-                    const participantSocket = clients.get(participantId);
-                    if (participantSocket) {
-                        participantSocket.send(`videoCall:${senderId}:${signalData}`);
+            case 'dm':
+                logger.info(`Received DM from ${userId} to ${recipientId}: ${text}`);
+                const recipientSocket = clients.get(recipientId);
+                if (recipientSocket) {
+                    recipientSocket.send(JSON.stringify({ type: 'dm', from: userId, text }));
+                    ws.send('DM sent successfully');
+                } else {
+                    ws.send('Recipient not connected');
+                }
+                break;
+
+            case 'forum':
+                logger.info(`Received forum message from ${userId}: ${text}`);
+                clients.forEach((clientSocket) => {
+                    if (clientSocket !== ws) {
+                        clientSocket.send(JSON.stringify({ type: 'forum', from: userId, text }));
                     }
                 });
-            } else {
-                ws.send('Meeting not found');
-            }
-        } else {
-            // Handle unknown messages
-            ws.send('Unknown message type');
+                ws.send('Forum message sent successfully');
+                break;
+
+            case 'videoCall':
+                logger.info(`Video call signal from ${userId} in meeting ${meetingId}`);
+                if (meetings.has(meetingId)) {
+                    meetings.get(meetingId).forEach(participantId => {
+                        const participantSocket = clients.get(participantId);
+                        if (participantSocket) {
+                            participantSocket.send(JSON.stringify({ type: 'videoCall', from: userId, signalData }));
+                        }
+                    });
+                } else {
+                    ws.send('Meeting not found');
+                }
+                break;
+
+            default:
+                ws.send('Unknown message type');
         }
     });
 
-    // Handle when a client disconnects
     ws.on('close', () => {
         logger.info(`WebSocket client disconnected: ${ws.userId}`);
-        // Remove the client from the clients map when they disconnect
         clients.delete(ws.userId);
-        
-        // Remove user from all meetings
+
         meetings.forEach((participants, meetingId) => {
             if (participants.delete(ws.userId) && participants.size === 0) {
-                meetings.delete(meetingId); // Remove meeting if no participants are left
+                meetings.delete(meetingId);
             }
         });
+    });
+
+    ws.on('error', (error) => {
+        logger.error(`WebSocket error: ${error.message}`);
     });
 });
 
