@@ -12,7 +12,7 @@ const port = process.env.PORT || 3000;
 const userRoutes = require('./routes/userRouter');
 const AdminRoutes = require('./routes/adminRouter');
 
-// Enable CORS for all routes
+// Enable CORS for all routes, including localhost
 app.use(cors());
 
 // Middleware to log requests using morgan with Winston stream
@@ -63,7 +63,8 @@ wss.on('connection', (ws) => {
             case 'createMeeting':
                 const newMeetingId = `meeting-${Date.now()}`;
                 meetings.set(newMeetingId, new Set([userId]));
-                ws.send(`meetingCreated:${newMeetingId}:https://yourfrontend.com/meeting/${newMeetingId}`);
+                // Use localhost for development
+                ws.send(`meetingCreated:${newMeetingId}:http://localhost:3001/meeting/${newMeetingId}`);
                 break;
 
             case 'joinMeeting':
