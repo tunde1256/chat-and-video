@@ -64,7 +64,7 @@ wss.on('connection', (ws) => {
                 const newMeetingId = `meeting-${Date.now()}`;
                 meetings.set(newMeetingId, new Set([userId]));
                 // Use localhost for development
-                ws.send(`meetingCreated:${newMeetingId}:http://localhost:3001/meeting/${newMeetingId}`);
+                ws.send(`meetingCreated:${newMeetingId}:https://chat-and-video.onrender.com/meeting/${newMeetingId}`);
                 break;
 
             case 'joinMeeting':
