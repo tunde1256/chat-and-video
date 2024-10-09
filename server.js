@@ -4,13 +4,15 @@ const morgan = require('morgan');
 const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
-const cors = require('cors'); // Import cors package
-const logger = require('./logger'); // Import the logger
-const db = require('./db/db');
+const cors = require('cors');
+const logger = require('./logger'); // Assuming you have a logger setup
+const db = require('./db/db'); // Assuming you have your database setup
+const userRoutes = require('./routes/userRouter');
+const adminRoutes = require('./routes/adminRouter');
+const meetingRoutes = require('./routes/meeting'); // Import meeting routes
+
 const app = express();
 const port = process.env.PORT || 3000;
-const userRoutes = require('./routes/userRouter');
-const AdminRoutes = require('./routes/adminRouter');
 
 // Enable CORS for all routes, including localhost
 app.use(cors());
@@ -25,17 +27,21 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(express.json());
 
 app.use('/api/users', userRoutes);
-app.use('/api/admin', AdminRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/meeting', meetingRoutes); // Add meeting routes
+
+// Serve static HTML file for video calls
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/index.html'); // Serve the HTML page
+});
 
 // Create an HTTP server from the Express app
 const server = http.createServer(app);
 
-// Create a WebSocket server, tied to the HTTP server
+// WebSocket setup
 const wss = new WebSocket.Server({ server });
 
-// Store clients in a Map to identify them by user ID or a unique identifier
 const clients = new Map();
-// Store meeting participants
 const meetings = new Map();
 
 wss.on('connection', (ws) => {
@@ -63,7 +69,6 @@ wss.on('connection', (ws) => {
             case 'createMeeting':
                 const newMeetingId = `meeting-${Date.now()}`;
                 meetings.set(newMeetingId, new Set([userId]));
-                // Use localhost for development
                 ws.send(`meetingCreated:${newMeetingId}:https://chat-and-video.onrender.com/meeting/${newMeetingId}`);
                 break;
 
@@ -87,38 +92,66 @@ wss.on('connection', (ws) => {
                 ws.send(`Left meeting: ${meetingId}`);
                 break;
 
-            case 'dm':
-                logger.info(`Received DM from ${userId} to ${recipientId}: ${text}`);
-                const recipientSocket = clients.get(recipientId);
-                if (recipientSocket) {
-                    recipientSocket.send(JSON.stringify({ type: 'dm', from: userId, text }));
-                    ws.send('DM sent successfully');
-                } else {
-                    ws.send('Recipient not connected');
-                }
-                break;
-
-            case 'forum':
-                logger.info(`Received forum message from ${userId}: ${text}`);
-                clients.forEach((clientSocket) => {
-                    if (clientSocket !== ws) {
-                        clientSocket.send(JSON.stringify({ type: 'forum', from: userId, text }));
-                    }
-                });
-                ws.send('Forum message sent successfully');
-                break;
-
-            case 'videoCall':
-                logger.info(`Video call signal from ${userId} in meeting ${meetingId}`);
+            case 'webrtcOffer':
+                logger.info(`Received WebRTC offer from ${userId} for meeting ${meetingId}`);
                 if (meetings.has(meetingId)) {
                     meetings.get(meetingId).forEach(participantId => {
-                        const participantSocket = clients.get(participantId);
-                        if (participantSocket) {
-                            participantSocket.send(JSON.stringify({ type: 'videoCall', from: userId, signalData }));
+                        if (participantId !== userId) {
+                            const participantSocket = clients.get(participantId);
+                            if (participantSocket) {
+                                participantSocket.send(JSON.stringify({ type: 'webrtcOffer', from: userId, signalData }));
+                            }
                         }
                     });
                 } else {
                     ws.send('Meeting not found');
+                }
+                break;
+
+            case 'webrtcAnswer':
+                logger.info(`Received WebRTC answer from ${userId} for meeting ${meetingId}`);
+                if (meetings.has(meetingId)) {
+                    meetings.get(meetingId).forEach(participantId => {
+                        if (participantId !== userId) {
+                            const participantSocket = clients.get(participantId);
+                            if (participantSocket) {
+                                participantSocket.send(JSON.stringify({ type: 'webrtcAnswer', from: userId, signalData }));
+                            }
+                        }
+                    });
+                } else {
+                    ws.send('Meeting not found');
+                }
+                break;
+
+            case 'webrtcCandidate':
+                logger.info(`Received WebRTC candidate from ${userId} for meeting ${meetingId}`);
+                if (meetings.has(meetingId)) {
+                    meetings.get(meetingId).forEach(participantId => {
+                        if (participantId !== userId) {
+                            const participantSocket = clients.get(participantId);
+                            if (participantSocket) {
+                                participantSocket.send(JSON.stringify({ type: 'webrtcCandidate', from: userId, signalData }));
+                            }
+                        }
+                    });
+                } else {
+                    ws.send('Meeting not found');
+                }
+                break;
+
+            // Add the new case for direct messaging
+            case 'sendMessage':
+                logger.info(`Direct message from ${userId} to ${recipientId}: ${text}`);
+                const recipientSocket = clients.get(recipientId);
+                if (recipientSocket) {
+                    recipientSocket.send(JSON.stringify({
+                        type: 'receiveMessage',
+                        from: userId,
+                        text: text,
+                    }));
+                } else {
+                    ws.send(`User ${recipientId} not found`);
                 }
                 break;
 
