@@ -9,7 +9,7 @@ const generateMeetingLink = async (req, res) => {
     }
 
     const meetingId = `meeting-${Date.now()}`;
-    const meetingLink = `https://chat-and-video.onrender.com/meeting/join/${meetingId}/${userId}`; // Updated link structure
+    const meetingLink = `https://chat-and-video.onrender.com/api/meeting/join/${meetingId}/${userId}`; // Updated link structure
 
     const meeting = new Meetings({ meetingId, meetingLink, participants: [userId] });
 
@@ -27,7 +27,7 @@ const createMeeting = async (req, res) => {
     try {
         const { userId } = req.body;
         const meetingId = `${Date.now()}`;
-        const meetingLink = `https://chat-and-video.onrender.com/meeting/${meetingId}`; // Ensure this matches your route prefix
+        const meetingLink = `https://chat-and-video.onrender.com/api/meeting/${meetingId}`; // Ensure this matches your route prefix
 
         const meeting = new Meetings({
             meetingId,
